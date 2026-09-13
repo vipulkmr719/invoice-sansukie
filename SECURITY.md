@@ -460,7 +460,96 @@ boundary. Acceptable for abuse control; not a hard guarantee.
 
 ---
 
-## 12. Reporting a vulnerability
+## 12. Database operations, backup and recovery
+
+Invoices are legal records under the 適格請求書等保存方式: a lost invoice is not
+merely inconvenient. Treat the database as the system of record and everything
+else as reconstructible.
+
+### Connection and privilege
+
+The application connects as a role that owns its own database and nothing else.
+Verified on the production-like deployment:
+
+| Property | Required | Verified |
+| --- | --- | --- |
+| `rolsuper` | false | ✔ |
+| `rolcreatedb` | false | ✔ |
+| `rolcreaterole` | false | ✔ |
+| `rolbypassrls` | false | ✔ |
+| `CONNECT` on any other database | revoked | ✔ |
+
+`CONNECT` is granted to `PUBLIC` by default on every PostgreSQL database, so
+granting nothing is not the same as revoking. Revoke it explicitly on each
+database and grant it back only to that database's own role:
+
+```sql
+REVOKE CONNECT ON DATABASE <db> FROM PUBLIC;
+GRANT  CONNECT ON DATABASE <db> TO <role>;
+```
+
+Without this the production role can open the development database, and vice
+versa — which is how a "staging" deployment ends up writing to production.
+
+### Connection pooling
+
+The Prisma driver adapter (`@prisma/adapter-pg`) pools connections per process,
+and `connection_limit` in `DATABASE_URL` sets the pool size. Measured on the
+production-like deployment: 25 concurrent requests held 11 server connections at
+`connection_limit=10`, and 7 at `connection_limit=3`.
+
+The number that matters in production is *per instance* × *instances*. On a
+platform that scales to many short-lived instances — serverless in particular —
+each one opens its own pool, so the server-side total can exceed
+`max_connections` long before any single instance misbehaves. Put an external
+pooler (PgBouncer, or the platform's own pooled endpoint) in front, point
+`DATABASE_URL` at it, and keep `connection_limit` small.
+
+### Backups
+
+Nightly `pg_dump` in custom format, retained 30 days, plus whatever
+point-in-time recovery the platform offers:
+
+```bash
+pg_dump "$DATABASE_URL" -Fc -f invoice-$(date +%Y%m%d).dump
+```
+
+Custom format (`-Fc`) rather than plain SQL: it restores selectively, in
+parallel, and compresses. Store dumps encrypted and off the database host — a
+backup on the same disk survives nothing that matters.
+
+### Recovery
+
+```bash
+createdb invoice_restore
+pg_restore -d "$RESTORE_URL" invoice-YYYYMMDD.dump
+```
+
+**Test the restore, do not assume it.** An untested backup is a belief, not a
+strategy. The check that catches a bad dump is row counts *and* constraints:
+
+```sql
+SELECT count(*) FROM users;          -- must match the source
+SELECT count(*) FROM pg_constraint c
+  JOIN pg_class t ON t.oid = c.conrelid
+  JOIN pg_namespace n ON n.oid = t.relnamespace
+ WHERE n.nspname = 'public' AND contype = 'c';   -- must be 14
+```
+
+A dump that restores rows but drops CHECK constraints leaves a database that
+accepts data the application considers impossible. This procedure was exercised
+end to end during pre-launch verification: dump, restore into a fresh database,
+and both row counts and all 14 CHECK constraints matched.
+
+### Migrations
+
+`prisma migrate deploy` only — never `migrate dev` against production, which can
+reset. Run it as a deploy step before the new code serves traffic, and confirm
+`prisma migrate status` reports no drift afterwards.
+
+---
+
+## 13. Reporting a vulnerability
 
 **Please do not open a public GitHub issue for a security problem.**
 
@@ -500,7 +589,7 @@ account is sufficient, and is exactly how our own IDOR tests are written.
 
 ---
 
-## 13. Known limitations
+## 14. Known limitations
 
 These are stated plainly rather than omitted. See the project README for the
 full list.

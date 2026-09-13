@@ -30,6 +30,34 @@ const { auth } = NextAuth(authConfig);
 
 const IS_SECURE_TRANSPORT = isSecureDeployment();
 
+/**
+ * The origin a browser actually reached us on.
+ *
+ * Behind a TLS-terminating proxy `request.nextUrl.origin` is the *internal*
+ * address the Node process listens on (http://localhost:3000), not the public
+ * one. Building the sign-in redirect from it puts an unreachable URL in a
+ * user-visible `callbackUrl`: Auth.js then discards it as off-origin — so it
+ * is not an open redirect — but the visitor loses the page they asked for, and
+ * an internal hostname ends up in a query string that gets logged and shared.
+ *
+ * `APP_URL` is the operator's own declaration of the public origin, so it is
+ * used in preference and, unlike `X-Forwarded-Host`, cannot be spoofed by a
+ * caller. It must therefore carry a non-default port if the public origin has
+ * one. When it is unset we fall back to the request's own origin, which is
+ * correct for a deployment with nothing in front.
+ */
+function publicOrigin(request: NextRequest): string {
+  const declared = process.env.APP_URL;
+  if (declared && /^https?:\/\//.test(declared)) {
+    try {
+      return new URL(declared).origin;
+    } catch {
+      // Malformed APP_URL: fall through rather than break sign-in.
+    }
+  }
+  return request.nextUrl.origin;
+}
+
 function applySecurityHeaders(response: NextResponse, nonce: string): NextResponse {
   for (const [name, value] of Object.entries(
     buildSecurityHeaders({ nonce, isSecureTransport: IS_SECURE_TRANSPORT }),
@@ -59,8 +87,11 @@ export default async function proxy(request: NextRequest) {
   const signedIn = Boolean(session?.user?.id);
 
   if (isProtectedPath(request.nextUrl.pathname) && !signedIn) {
-    const loginUrl = new URL('/login', request.nextUrl.origin);
-    loginUrl.searchParams.set('callbackUrl', request.nextUrl.href);
+    const loginUrl = new URL('/login', publicOrigin(request));
+    loginUrl.searchParams.set(
+      'callbackUrl',
+      new URL(request.nextUrl.pathname + request.nextUrl.search, publicOrigin(request)).href,
+    );
     return applySecurityHeaders(NextResponse.redirect(loginUrl), nonce);
   }
 
