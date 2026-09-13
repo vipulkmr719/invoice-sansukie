@@ -56,13 +56,26 @@ export const idField = (label = 'ID') =>
     .max(64, `${label}が不正です。`)
     .regex(/^[A-Za-z0-9_-]+$/, `${label}が不正です。`);
 
-/** `YYYY-MM-DD` as produced by `<input type="date">`, parsed in UTC. */
+/**
+ * `YYYY-MM-DD` as produced by `<input type="date">`, parsed in UTC.
+ *
+ * `Date.parse` is not a sufficient check on its own: it accepts 2026-02-30 and
+ * silently rolls it over to March 2nd. On an invoice that would print a date
+ * the user never chose, so the parsed value is required to round-trip back to
+ * the digits that were submitted.
+ */
 export const dateField = (label: string) =>
   trimmedString
     .regex(/^\d{4}-\d{2}-\d{2}$/, `${label}は YYYY-MM-DD 形式で入力してください。`)
-    .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00.000Z`)), {
-      message: `${label}が不正な日付です。`,
-    })
+    .refine(
+      (value) => {
+        const parsed = new Date(`${value}T00:00:00.000Z`);
+        if (Number.isNaN(parsed.getTime())) return false;
+        // Rejects rollover dates such as 2026-02-30 and 2025-02-29.
+        return parsed.toISOString().slice(0, 10) === value;
+      },
+      { message: `${label}が不正な日付です。` },
+    )
     .transform((value) => new Date(`${value}T00:00:00.000Z`));
 
 /**

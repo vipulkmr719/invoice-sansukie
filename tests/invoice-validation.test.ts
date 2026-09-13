@@ -8,7 +8,18 @@ const CLIENT_ID = 'clh1234567890abcdefghijk';
 
 function baseInvoice(overrides: Record<string, unknown> = {}) {
   return {
+    // 発行者 — snapshotted onto the invoice at issue time.
+    issuerName: '株式会社インボイス',
+    issuerAddress: '東京都渋谷区神宮前2-2-2',
+    issuerPhone: '03-5555-0123',
+    issuerEmail: 'billing@example.com',
+    issuerRegistrationNumber: 'T9234567890123',
+    // 請求先
     clientId: CLIENT_ID,
+    clientName: '株式会社サンプル',
+    clientAddress: '東京都千代田区千代田1-1',
+    clientEmail: 'taro@example.com',
+    // 請求書
     invoiceNumber: 'INV-2026-0001',
     issueDate: '2026-09-01',
     dueDate: '2026-09-30',
@@ -32,6 +43,8 @@ describe('請求書の検証 (invoice creation validation)', () => {
       expect(result.data.items).toHaveLength(1);
       expect(result.data.issueDate.toISOString()).toBe('2026-09-01T00:00:00.000Z');
       expect(result.data.notes).toBeNull();
+      expect(result.data.issuerRegistrationNumber).toBe('T9234567890123');
+      expect(result.data.clientName).toBe('株式会社サンプル');
     }
   });
 

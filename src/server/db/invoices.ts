@@ -8,6 +8,7 @@ import type {
   DashboardStatsDTO,
   InvoiceDetailDTO,
   InvoiceItemDTO,
+  InvoicePartyDTO,
   InvoiceSummaryDTO,
 } from './types';
 import { prisma } from './prisma';
@@ -86,6 +87,14 @@ export async function getInvoiceForUser(
       ...SUMMARY_SELECT,
       notes: true,
       createdAt: true,
+      issuerName: true,
+      issuerAddress: true,
+      issuerPhone: true,
+      issuerEmail: true,
+      issuerRegistrationNumber: true,
+      clientNameSnapshot: true,
+      clientAddressSnapshot: true,
+      clientEmailSnapshot: true,
       client: {
         select: {
           id: true,
@@ -113,6 +122,49 @@ export async function getInvoiceForUser(
 
   if (!invoice) return null;
 
+  // Invoices issued before the snapshot columns existed fall back to the live
+  // company record so older PDFs still carry an issuer.
+  const company = invoice.issuerName
+    ? null
+    : await prisma.company.findUnique({
+        where: { userId },
+        select: {
+          name: true,
+          address: true,
+          phone: true,
+          email: true,
+          registrationNumber: true,
+        },
+      });
+
+  const parties: InvoicePartyDTO = {
+    issuer: invoice.issuerName
+      ? {
+          name: invoice.issuerName,
+          address: invoice.issuerAddress ?? '',
+          phone: invoice.issuerPhone ?? '',
+          email: invoice.issuerEmail ?? '',
+          registrationNumber: invoice.issuerRegistrationNumber ?? '',
+        }
+      : company
+        ? {
+            name: company.name,
+            address: company.address,
+            phone: company.phone,
+            email: company.email,
+            registrationNumber: company.registrationNumber,
+          }
+        : null,
+    billTo: {
+      name:
+        invoice.clientNameSnapshot ??
+        invoice.client.companyName ??
+        invoice.client.name,
+      address: invoice.clientAddressSnapshot ?? invoice.client.address,
+      email: invoice.clientEmailSnapshot ?? invoice.client.email,
+    },
+  };
+
   const items: InvoiceItemDTO[] = invoice.items.map((item) => ({
     id: item.id,
     description: item.description,
@@ -136,6 +188,7 @@ export async function getInvoiceForUser(
       createdAt: invoice.client.createdAt.toISOString(),
     },
     items,
+    parties,
   };
 }
 
@@ -147,7 +200,18 @@ export interface InvoiceItemWriteInput {
   amount: number;
 }
 
-export interface InvoiceWriteInput {
+export interface InvoicePartyWriteInput {
+  issuerName: string;
+  issuerAddress: string;
+  issuerPhone: string;
+  issuerEmail: string;
+  issuerRegistrationNumber: string;
+  clientNameSnapshot: string;
+  clientAddressSnapshot: string | null;
+  clientEmailSnapshot: string | null;
+}
+
+export interface InvoiceWriteInput extends InvoicePartyWriteInput {
   clientId: string;
   invoiceNumber: string;
   issueDate: Date;
@@ -197,6 +261,14 @@ export async function createInvoiceForUser(
       tax8: input.tax8,
       tax10: input.tax10,
       total: input.total,
+      issuerName: input.issuerName,
+      issuerAddress: input.issuerAddress,
+      issuerPhone: input.issuerPhone,
+      issuerEmail: input.issuerEmail,
+      issuerRegistrationNumber: input.issuerRegistrationNumber,
+      clientNameSnapshot: input.clientNameSnapshot,
+      clientAddressSnapshot: input.clientAddressSnapshot,
+      clientEmailSnapshot: input.clientEmailSnapshot,
       items: {
         create: input.items.map((item, index) => ({
           description: item.description,

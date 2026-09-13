@@ -4,7 +4,7 @@ import { useActionState, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import type { ActionResult } from '@/lib/action-result';
-import type { ClientDTO } from '@/server/db/types';
+import type { ClientDTO, CompanyDTO } from '@/server/db/types';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -49,12 +49,14 @@ function toPreviewNumber(value: string): number {
 
 export function InvoiceForm({
   clients,
+  company,
   defaultInvoiceNumber,
   defaultIssueDate,
   defaultDueDate,
   action,
 }: {
   clients: ClientDTO[];
+  company: CompanyDTO | null;
   defaultInvoiceNumber: string;
   defaultIssueDate: string;
   defaultDueDate: string;
@@ -68,6 +70,20 @@ export function InvoiceForm({
     null,
   );
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
+
+  // The 請求先 fields below are seeded from the selected client but stay
+  // editable, because what gets printed on this invoice is what is stored on
+  // it — the address on file may have been right for an earlier invoice.
+  const [selectedClientId, setSelectedClientId] = useState<string>(
+    clients[0]?.id ?? '',
+  );
+  const selectedClient = clients.find((client) => client.id === selectedClientId);
+
+  const [clientOverrides, setClientOverrides] = useState<{
+    name?: string;
+    address?: string;
+    email?: string;
+  }>({});
 
   const failed = state && !state.ok ? state : null;
   const fieldErrors = failed?.fieldErrors ?? {};
@@ -137,10 +153,119 @@ export function InvoiceForm({
       {failed ? <Alert tone="error">{failed.message}</Alert> : null}
 
       <Card>
-        <CardHeader title="請求書情報" />
+        <CardHeader
+          title="発行者情報"
+          description={
+            company
+              ? '設定に登録された自社情報を読み込みました。この請求書だけ変更することもできます。'
+              : '自社情報が未登録です。この請求書に記載する発行者情報を入力してください。'
+          }
+        />
         <CardBody className="grid gap-5 sm:grid-cols-2">
           <Field
-            label="請求先"
+            label="会社名・屋号"
+            htmlFor="issuerName"
+            required
+            errors={fieldErrors.issuerName}
+            className="sm:col-span-2"
+          >
+            <TextInput
+              id="issuerName"
+              name="issuerName"
+              defaultValue={submitted?.issuerName ?? company?.name ?? ''}
+              required
+              maxLength={100}
+              placeholder="株式会社インボイス"
+              invalid={Boolean(fieldErrors.issuerName)}
+            />
+          </Field>
+
+          <Field
+            label="登録番号"
+            htmlFor="issuerRegistrationNumber"
+            hint="適格請求書発行事業者登録番号。「T」+ 数字13桁。"
+            required
+            errors={fieldErrors.issuerRegistrationNumber}
+            className="sm:col-span-2"
+          >
+            <TextInput
+              id="issuerRegistrationNumber"
+              name="issuerRegistrationNumber"
+              defaultValue={
+                submitted?.issuerRegistrationNumber ?? company?.registrationNumber ?? ''
+              }
+              required
+              placeholder="T1234567890123"
+              className="tabular"
+              autoComplete="off"
+              invalid={Boolean(fieldErrors.issuerRegistrationNumber)}
+            />
+          </Field>
+
+          <Field
+            label="メールアドレス"
+            htmlFor="issuerEmail"
+            required
+            errors={fieldErrors.issuerEmail}
+          >
+            <TextInput
+              id="issuerEmail"
+              name="issuerEmail"
+              type="email"
+              defaultValue={submitted?.issuerEmail ?? company?.email ?? ''}
+              required
+              maxLength={254}
+              placeholder="info@example.com"
+              invalid={Boolean(fieldErrors.issuerEmail)}
+            />
+          </Field>
+
+          <Field
+            label="電話番号"
+            htmlFor="issuerPhone"
+            required
+            errors={fieldErrors.issuerPhone}
+          >
+            <TextInput
+              id="issuerPhone"
+              name="issuerPhone"
+              type="tel"
+              defaultValue={submitted?.issuerPhone ?? company?.phone ?? ''}
+              required
+              placeholder="03-1234-5678"
+              className="tabular"
+              invalid={Boolean(fieldErrors.issuerPhone)}
+            />
+          </Field>
+
+          <Field
+            label="住所"
+            htmlFor="issuerAddress"
+            required
+            errors={fieldErrors.issuerAddress}
+            className="sm:col-span-2"
+          >
+            <TextArea
+              id="issuerAddress"
+              name="issuerAddress"
+              defaultValue={submitted?.issuerAddress ?? company?.address ?? ''}
+              required
+              maxLength={300}
+              placeholder={'〒100-0001\n東京都千代田区千代田1-1'}
+              invalid={Boolean(fieldErrors.issuerAddress)}
+            />
+          </Field>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="請求先"
+          description="顧客を選ぶと登録済みの情報が入ります。この請求書に記載する内容として編集できます。"
+        />
+        <CardBody className="grid gap-5 sm:grid-cols-2">
+          <Field
+            label="顧客"
             htmlFor="clientId"
             required
             errors={fieldErrors.clientId}
@@ -150,7 +275,13 @@ export function InvoiceForm({
               id="clientId"
               name="clientId"
               required
-              defaultValue={submitted?.clientId ?? clients[0]?.id ?? ''}
+              value={selectedClientId}
+              onChange={(event) => {
+                setSelectedClientId(event.target.value);
+                // Switching counterparty replaces the prefill rather than
+                // keeping the previous client's edited details.
+                setClientOverrides({});
+              }}
               invalid={Boolean(fieldErrors.clientId)}
             >
               {clients.map((client) => (
@@ -162,6 +293,90 @@ export function InvoiceForm({
             </Select>
           </Field>
 
+          <Field
+            label="請求先名（宛名）"
+            htmlFor="clientName"
+            hint="請求書には「◯◯御中」と表示されます。"
+            required
+            errors={fieldErrors.clientName}
+            className="sm:col-span-2"
+          >
+            <TextInput
+              id="clientName"
+              name="clientName"
+              value={
+                clientOverrides.name ??
+                submitted?.clientName ??
+                selectedClient?.companyName ??
+                selectedClient?.name ??
+                ''
+              }
+              onChange={(event) =>
+                setClientOverrides((current) => ({ ...current, name: event.target.value }))
+              }
+              required
+              maxLength={100}
+              invalid={Boolean(fieldErrors.clientName)}
+            />
+          </Field>
+
+          <Field
+            label="メールアドレス"
+            htmlFor="clientEmail"
+            errors={fieldErrors.clientEmail}
+          >
+            <TextInput
+              id="clientEmail"
+              name="clientEmail"
+              type="email"
+              value={
+                clientOverrides.email ??
+                submitted?.clientEmail ??
+                selectedClient?.email ??
+                ''
+              }
+              onChange={(event) =>
+                setClientOverrides((current) => ({ ...current, email: event.target.value }))
+              }
+              maxLength={254}
+              invalid={Boolean(fieldErrors.clientEmail)}
+            />
+          </Field>
+
+          <div className="hidden sm:block" />
+
+          <Field
+            label="住所"
+            htmlFor="clientAddress"
+            errors={fieldErrors.clientAddress}
+            className="sm:col-span-2"
+          >
+            <TextArea
+              id="clientAddress"
+              name="clientAddress"
+              value={
+                clientOverrides.address ??
+                submitted?.clientAddress ??
+                selectedClient?.address ??
+                ''
+              }
+              onChange={(event) =>
+                setClientOverrides((current) => ({
+                  ...current,
+                  address: event.target.value,
+                }))
+              }
+              maxLength={300}
+              placeholder={'〒100-0001\n東京都千代田区千代田1-1'}
+              invalid={Boolean(fieldErrors.clientAddress)}
+            />
+          </Field>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="請求書情報" />
+        <CardBody className="grid gap-5 sm:grid-cols-2">
           <Field
             label="請求書番号"
             htmlFor="invoiceNumber"

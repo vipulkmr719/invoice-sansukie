@@ -6,7 +6,6 @@ import { InvoiceSheet } from '@/components/invoices/InvoiceSheet';
 import { Alert } from '@/components/ui/Alert';
 import { deleteInvoiceAction } from '@/server/actions/invoices';
 import { requireUser } from '@/server/auth/guard';
-import { getCompanyForUser } from '@/server/db/companies';
 import { getInvoiceForUser } from '@/server/db/invoices';
 
 export const dynamic = 'force-dynamic';
@@ -40,8 +39,6 @@ export default async function InvoiceDetailPage({
     notFound();
   }
 
-  const company = await getCompanyForUser(user.id);
-
   return (
     <>
       <div className="no-print mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -69,13 +66,13 @@ export default async function InvoiceDetailPage({
 
       {query.created ? (
         <Alert tone="success" className="no-print mb-6">
-          請求書を作成しました。「PDFをダウンロード」から保存できます。
+          請求書を作成しました。「PDFをダウンロード」からPDFを保存できます。
         </Alert>
       ) : null}
 
-      {!company ? (
+      {!invoice.parties.issuer ? (
         <Alert tone="warning" className="no-print mb-6">
-          自社情報が未登録のため、発行者名と登録番号が印字されません。
+          発行者情報が登録されていないため、発行者名と登録番号が印字されません。
           <Link href="/settings" className="ml-1 font-medium underline">
             設定
           </Link>
@@ -83,7 +80,7 @@ export default async function InvoiceDetailPage({
         </Alert>
       ) : null}
 
-      <InvoiceSheet invoice={invoice} company={company} />
+      <InvoiceSheet invoice={invoice} />
     </>
   );
 }

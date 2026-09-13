@@ -42,6 +42,18 @@ const envSchema = z.object({
     .min(32, 'AUTH_SECRET must be at least 32 characters long'),
 
   APP_URL: z.url().default('http://localhost:3000'),
+
+  /**
+   * Optional path to a Chrome/Chromium binary for PDF rendering. Container
+   * images usually install their own; when unset, puppeteer's bundled build is
+   * used. Empty string is treated as unset so an empty line in .env does not
+   * point the renderer at "".
+   */
+  PDF_CHROME_PATH: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value === undefined || value === '' ? undefined : value)),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -52,6 +64,7 @@ function loadEnv(): Env {
     DATABASE_URL: process.env.DATABASE_URL,
     AUTH_SECRET: process.env.AUTH_SECRET,
     APP_URL: process.env.APP_URL,
+    PDF_CHROME_PATH: process.env.PDF_CHROME_PATH,
   });
 
   if (!parsed.success) {

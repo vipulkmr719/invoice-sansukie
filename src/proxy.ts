@@ -16,8 +16,19 @@ const SESSION_COOKIE_NAME = 'invoice_session';
 
 const PROTECTED_PREFIXES = ['/dashboard', '/invoices', '/clients', '/settings'];
 
+/**
+ * Endpoints that answer with data rather than a page. These must not be
+ * redirected: a client fetching a PDF should get 401 with a JSON body, not an
+ * HTML login page under a 200. Their own handlers do the authorisation.
+ */
+const DATA_ENDPOINTS = [/^\/invoices\/[^/]+\/pdf$/];
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (DATA_ENDPOINTS.some((pattern) => pattern.test(pathname))) {
+    return NextResponse.next();
+  }
 
   const isProtected = PROTECTED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

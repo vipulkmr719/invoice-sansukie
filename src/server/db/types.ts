@@ -57,11 +57,34 @@ export interface InvoiceSummaryDTO {
   clientCompanyName: string | null;
 }
 
+/**
+ * The parties exactly as they appear on one invoice.
+ *
+ * Built from the invoice's own snapshot columns; for invoices issued before
+ * those columns existed the repository falls back to the live Company / Client
+ * rows, so every consumer sees the same shape either way.
+ */
+export interface InvoicePartyDTO {
+  issuer: {
+    name: string;
+    address: string;
+    phone: string;
+    email: string;
+    registrationNumber: string;
+  } | null;
+  billTo: {
+    name: string;
+    address: string | null;
+    email: string | null;
+  };
+}
+
 export interface InvoiceDetailDTO extends InvoiceSummaryDTO {
   notes: string | null;
   createdAt: string;
   client: ClientDTO;
   items: InvoiceItemDTO[];
+  parties: InvoicePartyDTO;
 }
 
 export interface DashboardStatsDTO {

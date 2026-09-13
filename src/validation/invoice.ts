@@ -2,12 +2,16 @@ import { z } from 'zod';
 
 import { INVOICE_NUMBER_PATTERN } from '@/domain/invoice-number';
 import { VALID_TAX_RATES } from '@/domain/tax';
+import { registrationNumberField } from './company';
 
 import {
   dateField,
+  emailField,
   idField,
   numericField,
+  optionalEmailField,
   optionalText,
+  requiredPhoneField,
   requiredText,
   trimmedString,
 } from './common';
@@ -75,9 +79,31 @@ export const invoiceNumberField = trimmedString
     '請求書番号は英数字とハイフンのみ、3文字以上で入力してください。',
   );
 
+/**
+ * 発行者情報 — captured on the invoice itself rather than read from the company
+ * profile at print time, so an issued invoice keeps the details it was issued
+ * with. The form prefills these from 設定.
+ */
+export const invoiceIssuerSchema = z.object({
+  issuerName: requiredText('発行者の会社名', 100),
+  issuerAddress: requiredText('発行者の住所', 300),
+  issuerPhone: requiredPhoneField('発行者の電話番号'),
+  issuerEmail: emailField('発行者のメールアドレス'),
+  issuerRegistrationNumber: registrationNumberField,
+});
+
+/** 請求先 — the counterparty as printed on this invoice. */
+export const invoiceClientSchema = z.object({
+  clientId: idField('顧客ID'),
+  clientName: requiredText('請求先名', 100),
+  clientAddress: optionalText(300),
+  clientEmail: optionalEmailField('請求先のメールアドレス'),
+});
+
 export const invoiceSchema = z
   .object({
-    clientId: idField('顧客ID'),
+    ...invoiceIssuerSchema.shape,
+    ...invoiceClientSchema.shape,
     invoiceNumber: invoiceNumberField,
     issueDate: dateField('発行日'),
     dueDate: dateField('支払期限'),

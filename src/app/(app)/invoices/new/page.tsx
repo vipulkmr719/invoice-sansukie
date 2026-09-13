@@ -37,16 +37,17 @@ export default async function NewInvoicePage() {
 
       {!company ? (
         <Alert tone="warning" className="mb-6">
-          自社情報が未設定です。請求書に登録番号を記載するには
+          自社情報が未設定です。下の「発行者情報」に入力すればこの請求書は作成できますが、
           <Link href="/settings" className="mx-1 font-medium underline">
             設定
           </Link>
-          で自社情報を登録してください。（未設定でも請求書は作成できます）
+          に登録しておくと次回から自動で入力されます。
         </Alert>
       ) : null}
 
       <InvoiceForm
         clients={clients}
+        company={company}
         defaultInvoiceNumber={invoiceNumber}
         defaultIssueDate={toDateInputValue(today)}
         defaultDueDate={toDateInputValue(addDaysUtc(today, DEFAULT_PAYMENT_DAYS))}

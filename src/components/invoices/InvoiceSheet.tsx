@@ -1,4 +1,4 @@
-import type { CompanyDTO, InvoiceDetailDTO } from '@/server/db/types';
+import type { InvoiceDetailDTO } from '@/server/db/types';
 import { formatRegistrationNumber } from '@/domain/registration-number';
 import { formatNumber, formatYen } from '@/domain/money';
 import { formatJapaneseDate } from '@/lib/date';
@@ -13,13 +13,12 @@ import { TAX_RATE_REDUCED, taxRateLabel } from '@/domain/tax';
  * *per tax rate*, the tax amount per rate, and the recipient's name. Every one
  * of those has a place below.
  */
-export function InvoiceSheet({
-  invoice,
-  company,
-}: {
-  invoice: InvoiceDetailDTO;
-  company: CompanyDTO | null;
-}) {
+export function InvoiceSheet({ invoice }: { invoice: InvoiceDetailDTO }) {
+  // The parties come from the invoice's own snapshot (falling back to the live
+  // company record for invoices issued before snapshots existed), so this
+  // preview shows exactly what the generated PDF will show.
+  const { issuer, billTo } = invoice.parties;
+
   const hasReducedRate = invoice.items.some((item) => item.taxRate === TAX_RATE_REDUCED);
 
   // 税率ごとの対価の額 — derived from the stored line amounts, so the printed
@@ -48,36 +47,40 @@ export function InvoiceSheet({
         <div>
           <p className="text-xs font-medium text-ink-400">請求先</p>
           <p className="mt-2 border-b border-ink-300 pb-1.5 text-lg font-semibold text-ink-900">
-            {invoice.client.companyName ?? invoice.client.name}
+            {billTo.name}
             <span className="ml-1 text-sm font-normal">御中</span>
           </p>
-          {invoice.client.companyName ? (
-            <p className="mt-1.5 text-sm text-ink-600">{invoice.client.name} 様</p>
-          ) : null}
-          {invoice.client.address ? (
+          {billTo.address ? (
             <p className="mt-1.5 text-sm whitespace-pre-line text-ink-600">
-              {invoice.client.address}
+              {billTo.address}
             </p>
+          ) : null}
+          {billTo.email ? (
+            <p className="mt-1 text-sm text-ink-600">{billTo.email}</p>
           ) : null}
         </div>
 
         {/* 発行者 */}
         <div className="sm:text-right">
-          {company ? (
+          {issuer ? (
             <>
-              <p className="text-base font-semibold text-ink-900">{company.name}</p>
+              <p className="text-base font-semibold text-ink-900">{issuer.name}</p>
               <p className="mt-1.5 text-sm whitespace-pre-line text-ink-600">
-                {company.address}
+                {issuer.address}
               </p>
-              <p className="tabular mt-1 text-sm text-ink-600">TEL: {company.phone}</p>
-              <p className="mt-0.5 text-sm text-ink-600">{company.email}</p>
+              {issuer.phone ? (
+                <p className="tabular mt-1 text-sm text-ink-600">TEL: {issuer.phone}</p>
+              ) : null}
+              {issuer.email ? (
+                <p className="mt-0.5 text-sm text-ink-600">{issuer.email}</p>
+              ) : null}
               <p className="tabular mt-2 text-sm font-medium text-ink-800">
-                登録番号：{formatRegistrationNumber(company.registrationNumber)}
+                登録番号：{formatRegistrationNumber(issuer.registrationNumber)}
               </p>
             </>
           ) : (
             <p className="text-sm text-ink-400">
-              自社情報が未登録です。設定画面から登録してください。
+              発行者情報が登録されていません。設定画面から登録してください。
             </p>
           )}
         </div>

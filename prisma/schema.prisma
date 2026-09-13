@@ -104,6 +104,29 @@ model Invoice {
 
   notes String?
 
+  // --------------------------------------------------------------------------
+  // Snapshot of the parties as of issue.
+  //
+  // An issued invoice is a record of a transaction that already happened: if the
+  // issuer later moves office or a client is renamed, the invoice that was sent
+  // must not silently change. These columns freeze what was on the document.
+  //
+  // Nullable so invoices created before this migration keep working — readers
+  // fall back to the live Company / Client rows for those.
+  // --------------------------------------------------------------------------
+
+  /// 発行者 (issuer) as printed on this invoice.
+  issuerName               String?
+  issuerAddress            String?
+  issuerPhone              String?
+  issuerEmail              String?
+  issuerRegistrationNumber String?
+
+  /// 請求先 (client) as printed on this invoice.
+  clientNameSnapshot    String?
+  clientAddressSnapshot String?
+  clientEmailSnapshot   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

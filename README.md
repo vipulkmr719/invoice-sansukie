@@ -14,7 +14,7 @@ Next.js (App Router) · TypeScript (strict) · Tailwind CSS · PostgreSQL · Pri
 | 登録番号の検証 | 適格請求書発行事業者登録番号を「T + 数字13桁」の形式と国税庁のチェックデジットで検証します。 |
 | 顧客管理 | 取引先を登録し、請求実績（件数・累計金額）を顧客ごとに集計します。 |
 | ダッシュボード | 今月／累計の請求額、消費税合計、支払期限超過、直近6か月の推移。 |
-| PDF 出力 | 印刷用スタイルで A4 に最適化。ブラウザの「PDFとして保存」でそのまま保存できます。 |
+| PDF 出力 | Puppeteer によるサーバーサイド生成。A4・日本語フォント埋め込みで、閲覧環境に依存せず同じ体裁になります。 |
 
 ---
 
@@ -45,6 +45,7 @@ cp .env.example .env
 | `AUTH_SECRET` | ✔ | セッション JWT の署名鍵。32文字以上。 |
 | `NODE_ENV` | | `development` \| `test` \| `production` |
 | `APP_URL` | | 公開オリジン。既定は `http://localhost:3000` |
+| `PDF_CHROME_PATH` | | PDF 生成に使う Chrome/Chromium のパス。未設定なら puppeteer 同梱版を使用。 |
 
 `AUTH_SECRET` の生成:
 
@@ -112,7 +113,12 @@ src/
 ├── server/                   サーバー専用。'server-only' で保護
 │   ├── actions/              Server Actions（唯一の書き込み入口）
 │   ├── db/                   データアクセス層（リポジトリ + DTO）
-│   └── auth/                 セッション・パスワード・認可ガード
+│
+│   ├── auth/                 セッション・パスワード・認可ガード
+│   └── pdf/                  PDF 生成
+│       ├── invoice-template.ts  適格請求書の HTML テンプレート（全値エスケープ）
+│       ├── render.ts            Puppeteer によるレンダリング
+│       └── browser.ts           ブラウザインスタンスの管理
 │
 ├── domain/                   ビジネスロジック（純粋関数・依存なし）
 │   ├── money.ts              BigInt による厳密な金額計算
@@ -121,7 +127,7 @@ src/
 │   └── invoice-number.ts     請求書番号の採番
 │
 ├── validation/               Zod スキーマ（入力の境界）
-├── lib/                      env, errors, date, cn, action-result
+├── lib/                      env, errors, date, cn, action-result, html
 └── proxy.ts                  エッジでの事前リダイレクト（補助的な関門）
 ```
 
@@ -143,7 +149,7 @@ src/
 | `users` | `id`, `email` (unique), `passwordHash` (nullable), `createdAt`, `updatedAt` |
 | `companies` | `id`, `userId` (unique), `name`, `address`, `phone`, `email`, `registrationNumber`, timestamps |
 | `clients` | `id`, `userId`, `name`, `companyName?`, `address?`, `email?`, `phone?`, timestamps |
-| `invoices` | `id`, `userId`, `clientId`, `invoiceNumber`, `issueDate`, `dueDate`, `subtotal`, `tax8`, `tax10`, `total`, `notes?`, timestamps |
+| `invoices` | `id`, `userId`, `clientId`, `invoiceNumber`, `issueDate`, `dueDate`, `subtotal`, `tax8`, `tax10`, `total`, `notes?`, 当事者スナップショット（下記）, timestamps |
 | `invoice_items` | `id`, `invoiceId`, `description`, `quantity`, `unitPrice`, `taxRate`, `amount`, `position` |
 
 **制約とインデックス**
@@ -161,6 +167,16 @@ src/
 
 `position` は明細の表示順を保持するための列です（cuid は並び替えに使えないため）。
 
+**当事者のスナップショット**
+
+`invoices` には発行時点の当事者情報を固定する列があります
+（`issuerName` / `issuerAddress` / `issuerPhone` / `issuerEmail` /
+`issuerRegistrationNumber` / `clientNameSnapshot` / `clientAddressSnapshot` /
+`clientEmailSnapshot`）。発行済みの請求書は取引の記録であり、後から自社が移転
+したり顧客名が変わったりしても、**すでに送付した請求書の記載が変わってはいけない**
+ためです。これらの列が NULL の請求書（スナップショット導入前のもの）は、読み出し
+時に現在の `companies` / `clients` レコードにフォールバックします。
+
 ---
 
 ## セキュリティ
@@ -177,6 +193,8 @@ src/
 | SQL インジェクション対策 | Prisma のパラメータ化クエリのみ。生 SQL は引数のない `SELECT 1` だけです。 |
 | 認可 | すべてのクエリが `where: { userId }` で絞り込み。他人の ID を指定しても 404 になります。 |
 | エラー処理 | `AppError` は日本語の安全なメッセージ、それ以外はサーバーログに記録し汎用文言に置き換え。スタックトレースやシークレットは返しません。 |
+| XSS 対策 | PDF/HTML はエスケープ既定のタグ付きテンプレートで構築。生の markup を入れられるのは `unsafeRawHtml()` のみ（呼び出しは定数 CSS 1箇所）。React 側は既定でエスケープされます。 |
+| PDF レンダラーの隔離 | ページ上で JavaScript を無効化、初回ドキュメント以外の通信を遮断（SSRF 対策）、リクエストごとに独立コンテキスト。 |
 | パスワード | scrypt（N=2^17, r=8, p=1）+ ランダムソルト、`timingSafeEqual` で比較。 |
 | ログインのタイミング攻撃対策 | アカウントが存在しない場合もダミーハッシュで同じ計算を実行します。 |
 | セッション | HS256 署名 JWT を httpOnly / SameSite=Lax / 本番は Secure な Cookie に格納。中身は user id のみ。毎リクエストで DB 実在確認。 |
@@ -196,6 +214,11 @@ npm test
 | --- | --- |
 | `tests/db.test.ts` | データベース接続、全モデルの疎通、マイグレーション適用確認、請求書の永続化、CHECK 制約（不正な税率・負の数量・負の単価・合計不整合・登録番号形式・日付逆転）、パスワードハッシュ |
 | `tests/invoice-validation.test.ts` | 請求書作成の検証、明細の税率、負の数量、負の単価、登録番号（形式・チェックデジット）、顧客の検証 |
+| `tests/invoice-security.test.ts` | セキュリティ要件の9項目（XSS×3・登録番号・負の数量・負の単価・不正な税率・極端に大きい値・必須項目の欠落）+ 日付と識別子 |
+| `tests/invoice-persistence.test.ts` | 作成→保存→再読み込み、スナップショットの固定、日本語の往復、顧客の所有権チェック |
+| `tests/html-escaping.test.ts` | エスケープ処理、タグ付きテンプレート、`nl2br`、XSS ペイロード14種 |
+| `tests/pdf-template.test.ts` | 適格請求書の記載事項、税率ごとの内訳、全フィールドへの XSS ペイロード注入 |
+| `tests/pdf-security.test.ts` | 実ブラウザでの検証（**JavaScript を有効にしても**何も実行されない）、外部通信ゼロ、PDF 生成とフォント埋め込み |
 | `tests/tax.test.ts` | 税率の妥当性、税率ごとの端数処理、8%/10% の区分集計 |
 | `tests/registration-number.test.ts` | 形式・チェックデジット・全角正規化・表示整形 |
 | `tests/money.test.ts` | BigInt による厳密計算、丸め、浮動小数点誤差の回避 |
@@ -203,6 +226,29 @@ npm test
 データベーステストは `.env` の `DATABASE_URL` に接続します。作成したデータは後片付けされます。
 
 ---
+
+## PDF 生成
+
+`GET /invoices/:id/pdf` がサーバーサイドで PDF を生成します。
+
+1. `src/server/pdf/invoice-template.ts` が適格請求書の HTML を組み立てます。
+   ユーザー由来の値はすべて `src/lib/html.ts` の `html` タグ付きテンプレートを
+   通り、**既定でエスケープ**されます。生の markup を入れられるのは
+   `unsafeRawHtml()` だけで、呼び出し箇所は本文中の定数 CSS ひとつです。
+2. `src/server/pdf/render.ts` が Puppeteer でレンダリングします。多層防御:
+   - ページ上で **JavaScript を無効化**（万一エスケープ漏れがあっても実行系がない）
+   - **初回ドキュメント以外の通信をすべて遮断**（外部への情報送信と SSRF を封鎖）
+   - リクエストごとに独立した incognito コンテキスト
+   - タイムアウトと確実なページ破棄
+3. ルートハンドラは認証済みユーザーのスコープで請求書を取得します。未ログインは
+   401、他人の請求書 ID は 404（存在有無を区別させない）。
+
+テンプレートは自己完結しており、外部 CSS・スクリプト・フォント・画像を一切
+読み込みません。日本語フォントは PDF にサブセット埋め込みされるため、フォントが
+入っていない環境で開いても文字化けしません。
+
+> 本番環境では、レンダリングを行うホストに日本語フォント
+> （`fonts-ipafont-gothic` や `fonts-noto-cjk` など）が必要です。
 
 ## 消費税の計算について
 

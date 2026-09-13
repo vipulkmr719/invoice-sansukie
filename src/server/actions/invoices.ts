@@ -60,7 +60,15 @@ function readItems(formData: FormData): unknown[] {
 }
 
 const INVOICE_FIELDS = [
+  'issuerName',
+  'issuerAddress',
+  'issuerPhone',
+  'issuerEmail',
+  'issuerRegistrationNumber',
   'clientId',
+  'clientName',
+  'clientAddress',
+  'clientEmail',
   'invoiceNumber',
   'issueDate',
   'dueDate',
@@ -76,7 +84,15 @@ export async function createInvoiceAction(
   const values = collectValues(formData, INVOICE_FIELDS);
 
   const parsed = invoiceSchema.safeParse({
+    issuerName: formData.get('issuerName'),
+    issuerAddress: formData.get('issuerAddress'),
+    issuerPhone: formData.get('issuerPhone'),
+    issuerEmail: formData.get('issuerEmail'),
+    issuerRegistrationNumber: formData.get('issuerRegistrationNumber'),
     clientId: formData.get('clientId'),
+    clientName: formData.get('clientName'),
+    clientAddress: formData.get('clientAddress'),
+    clientEmail: formData.get('clientEmail'),
     invoiceNumber: formData.get('invoiceNumber'),
     issueDate: formData.get('issueDate'),
     dueDate: formData.get('dueDate'),
@@ -123,6 +139,15 @@ export async function createInvoiceAction(
       issueDate: parsed.data.issueDate,
       dueDate: parsed.data.dueDate,
       notes: parsed.data.notes,
+      // Freeze both parties as they were at issue time.
+      issuerName: parsed.data.issuerName,
+      issuerAddress: parsed.data.issuerAddress,
+      issuerPhone: parsed.data.issuerPhone,
+      issuerEmail: parsed.data.issuerEmail,
+      issuerRegistrationNumber: parsed.data.issuerRegistrationNumber,
+      clientNameSnapshot: parsed.data.clientName,
+      clientAddressSnapshot: parsed.data.clientAddress,
+      clientEmailSnapshot: parsed.data.clientEmail,
       subtotal: totals.subtotal,
       tax8: totals.tax8,
       tax10: totals.tax10,

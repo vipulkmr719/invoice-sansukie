@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/Button';
 import { SubmitButton } from '@/components/ui/SubmitButton';
 
 /**
- * The toolbar above an invoice: print-to-PDF and delete.
+ * The toolbar above an invoice: download the server-rendered PDF, or delete.
  *
- * "PDFをダウンロード" calls `window.print()`. The print stylesheet in
- * globals.css strips the app chrome, so the browser's own "PDFとして保存"
- * destination produces a clean A4 document — no PDF library in the bundle and
- * no server-side rendering pass.
+ * "PDFをダウンロード" fetches `/invoices/:id/pdf`, which renders the document
+ * with Puppeteer on the server. Going through `fetch` rather than a plain link
+ * lets the button show progress and surface the route's JSON error instead of
+ * navigating the user to a blob of error text.
  */
 export function InvoiceActions({
   invoiceId,
@@ -28,12 +28,55 @@ export function InvoiceActions({
   ) => Promise<ActionResult<undefined>>;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
   const [state, formAction] = useActionState<ActionResult<undefined> | null, FormData>(
     deleteAction,
     null,
   );
 
   const failed = state && !state.ok ? state : null;
+
+  async function downloadPdf() {
+    setDownloading(true);
+    setDownloadError(null);
+
+    let objectUrl: string | null = null;
+
+    try {
+      const response = await fetch(`/invoices/${invoiceId}/pdf`);
+
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        const message =
+          body && typeof body === 'object' && 'error' in body
+            ? String((body as { error: unknown }).error)
+            : 'PDFの生成に失敗しました。';
+        setDownloadError(message);
+        return;
+      }
+
+      const blob = await response.blob();
+      objectUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `invoice-${invoiceNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch {
+      setDownloadError('PDFの生成に失敗しました。通信状況をご確認ください。');
+    } finally {
+      if (objectUrl !== null) {
+        // Revoke after the click has been handled so the download still starts.
+        const url = objectUrl;
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+      setDownloading(false);
+    }
+  }
 
   return (
     <div className="no-print">
@@ -43,9 +86,15 @@ export function InvoiceActions({
         </Alert>
       ) : null}
 
+      {downloadError ? (
+        <Alert tone="error" className="mb-4">
+          {downloadError}
+        </Alert>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={() => window.print()}>
-          PDFをダウンロード
+        <Button type="button" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? 'PDFを生成中…' : 'PDFをダウンロード'}
         </Button>
 
         {confirming ? (
