@@ -43,7 +43,7 @@ export default async function UpgradePage({
         </Alert>
       ) : null}
 
-      {!isBillingConfigured ? (
+      {!isBillingConfigured() ? (
         <Alert tone="info" className="mb-6">
           この環境では決済が構成されていないため、お支払いに進めません。
         </Alert>
@@ -125,7 +125,7 @@ export default async function UpgradePage({
               'いつでも解約可能',
             ]}
             highlighted
-            available={isBillingConfigured}
+            available={isBillingConfigured()}
             action={startCheckoutAction}
           />
           <PlanCard
@@ -140,7 +140,7 @@ export default async function UpgradePage({
               '顧客管理',
               '更新手続き不要',
             ]}
-            available={isBillingConfigured}
+            available={isBillingConfigured()}
             action={startCheckoutAction}
           />
         </div>

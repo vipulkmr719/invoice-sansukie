@@ -541,6 +541,26 @@ accepts data the application considers impossible. This procedure was exercised
 end to end during pre-launch verification: dump, restore into a fresh database,
 and both row counts and all 14 CHECK constraints matched.
 
+### Configuration at build time versus runtime
+
+Environment validation is deliberately **lazy** — it runs on first use, not at
+module evaluation. `next build` evaluates every route module to collect its
+config, so validating at import time made a production build require a live
+`DATABASE_URL` and `AUTH_SECRET`. A build has no business holding production
+secrets, and a platform that does not expose them at build time failed with a
+stack trace inside page-data collection rather than a message naming the
+variable.
+
+Fail-fast is preserved where it belongs. `src/instrumentation.ts` reads the
+environment once when the server boots — runtime, never build — so a
+misconfigured deployment refuses to start and names the missing variable,
+instead of starting and degrading quietly under traffic.
+
+The two properties are asserted together in `tests/env-lazy.test.ts`, which
+runs the modules in a stripped child process because module-evaluation
+behaviour cannot be observed from inside a test runner that already has a valid
+environment.
+
 ### Migrations
 
 `prisma migrate deploy` only — never `migrate dev` against production, which can

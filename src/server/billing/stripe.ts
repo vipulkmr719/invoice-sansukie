@@ -39,7 +39,7 @@ export class BillingNotConfiguredError extends Error {
 
 export function requireStripe(): Stripe {
   const stripe = getStripe();
-  if (!stripe || !isBillingConfigured) {
+  if (!stripe || !isBillingConfigured()) {
     throw new BillingNotConfiguredError();
   }
   return stripe;
