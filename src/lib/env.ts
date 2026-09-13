@@ -16,6 +16,24 @@ import { z } from 'zod';
 
 const DATABASE_URL_PROTOCOLS = ['postgres:', 'postgresql:'] as const;
 
+/**
+ * An optional secret that, when present, must have the expected shape.
+ *
+ * Validating the prefix catches the common deployment mistake of pasting a
+ * publishable key where a secret key belongs — which would otherwise fail at
+ * the first payment rather than at boot. The value itself is never logged.
+ */
+function optionalSecret(name: string, pattern: RegExp) {
+  return z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value === undefined || value === '' ? undefined : value))
+    .refine((value) => value === undefined || pattern.test(value), {
+      message: `${name} does not look like the expected Stripe value`,
+    });
+}
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
@@ -54,6 +72,18 @@ const envSchema = z.object({
     .trim()
     .optional()
     .transform((value) => (value === undefined || value === '' ? undefined : value)),
+
+  // ---------------------------------------------------------------------------
+  // Stripe (all optional; billing simply stays disabled when unset, so the app
+  // runs in development and in CI without payment credentials).
+  //
+  // These are secrets. They are read only here and used only in `src/server`,
+  // so they never reach a browser bundle.
+  // ---------------------------------------------------------------------------
+  STRIPE_SECRET_KEY: optionalSecret('STRIPE_SECRET_KEY', /^sk_(test|live)_/),
+  STRIPE_WEBHOOK_SECRET: optionalSecret('STRIPE_WEBHOOK_SECRET', /^whsec_/),
+  STRIPE_PRICE_ID_MONTHLY: optionalSecret('STRIPE_PRICE_ID_MONTHLY', /^price_/),
+  STRIPE_PRICE_ID_LIFETIME: optionalSecret('STRIPE_PRICE_ID_LIFETIME', /^price_/),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -65,6 +95,10 @@ function loadEnv(): Env {
     AUTH_SECRET: process.env.AUTH_SECRET,
     APP_URL: process.env.APP_URL,
     PDF_CHROME_PATH: process.env.PDF_CHROME_PATH,
+    STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+    STRIPE_PRICE_ID_MONTHLY: process.env.STRIPE_PRICE_ID_MONTHLY,
+    STRIPE_PRICE_ID_LIFETIME: process.env.STRIPE_PRICE_ID_LIFETIME,
   });
 
   if (!parsed.success) {
@@ -86,3 +120,13 @@ export const env: Env = loadEnv();
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * Whether payments are configured. Checkout is offered only when true; the
+ * rest of the application works either way.
+ */
+export const isBillingConfigured =
+  env.STRIPE_SECRET_KEY !== undefined &&
+  env.STRIPE_WEBHOOK_SECRET !== undefined &&
+  (env.STRIPE_PRICE_ID_MONTHLY !== undefined ||
+    env.STRIPE_PRICE_ID_LIFETIME !== undefined);

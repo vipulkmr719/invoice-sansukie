@@ -56,6 +56,12 @@ export const SettingsIcon = () => (
   </Icon>
 );
 
+export const PlanIcon = () => (
+  <Icon>
+    <path d="M12 2 15.09 8.26 22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2Z" />
+  </Icon>
+);
+
 export const LogoutIcon = () => (
   <Icon>
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

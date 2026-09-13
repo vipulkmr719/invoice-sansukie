@@ -27,6 +27,11 @@ export type ActionResult<TData = undefined> =
       message: string;
       fieldErrors?: FieldErrors;
       values?: SubmittedValues;
+      /**
+       * Set when a plan limit — not the input — caused the failure, so the UI
+       * can offer an upgrade instead of asking the user to correct a field.
+       */
+      upgradeRequired?: boolean;
     };
 
 export function actionSuccess(): ActionResult<undefined>;
@@ -37,13 +42,18 @@ export function actionSuccess<TData>(data?: TData): ActionResult<TData | undefin
 
 export function actionFailure<TData = undefined>(
   message: string,
-  options: { fieldErrors?: FieldErrors; values?: SubmittedValues } = {},
+  options: {
+    fieldErrors?: FieldErrors;
+    values?: SubmittedValues;
+    upgradeRequired?: boolean;
+  } = {},
 ): ActionResult<TData> {
   return {
     ok: false,
     message,
     ...(options.fieldErrors ? { fieldErrors: options.fieldErrors } : {}),
     ...(options.values ? { values: options.values } : {}),
+    ...(options.upgradeRequired ? { upgradeRequired: true } : {}),
   };
 }
 

@@ -10,6 +10,7 @@ import {
   DashboardIcon,
   InvoiceIcon,
   LogoutIcon,
+  PlanIcon,
   PlusIcon,
   SettingsIcon,
 } from './icons';
@@ -44,6 +45,9 @@ export function AppShell({
       </NavLink>
       <NavLink href="/clients" icon={<ClientIcon />} onNavigate={closeDrawer}>
         顧客
+      </NavLink>
+      <NavLink href="/upgrade" icon={<PlanIcon />} onNavigate={closeDrawer}>
+        プラン
       </NavLink>
       <NavLink href="/settings" icon={<SettingsIcon />} onNavigate={closeDrawer}>
         設定

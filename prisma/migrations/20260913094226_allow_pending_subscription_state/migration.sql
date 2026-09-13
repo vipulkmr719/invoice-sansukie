@@ -1,0 +1,12 @@
+-- Drop billing_free_has_no_plan_state.
+--
+-- It asserted that a row on the free plan cannot carry a subscription id, but
+-- that is exactly the state between `checkout.session.completed` and the
+-- `customer.subscription.*` events that follow: the subscription id is known
+-- and worth recording (later events resolve the account through it), while the
+-- plan is not yet confirmed.
+--
+-- Nothing is lost by removing it. Entitlement is decided by resolveEntitlement,
+-- which fails closed: a row whose plan is `free` grants nothing regardless of
+-- which Stripe identifiers it carries.
+ALTER TABLE "billing" DROP CONSTRAINT "billing_free_has_no_plan_state";

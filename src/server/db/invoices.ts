@@ -1,7 +1,13 @@
 import 'server-only';
 
 import { nextInvoiceNumber } from '@/domain/invoice-number';
-import { ConflictError, NotFoundError } from '@/lib/errors';
+import {
+  QUOTA_REACHED_MESSAGE,
+  resolveEntitlement,
+  type BillingPlanName,
+  type BillingStatusName,
+} from '@/domain/entitlement';
+import { ConflictError, NotFoundError, QuotaExceededError } from '@/lib/errors';
 import { startOfMonthUtc, todayUtc, addMonthsUtc } from '@/lib/date';
 
 import type {
@@ -233,54 +239,97 @@ export async function createInvoiceForUser(
   userId: string,
   input: InvoiceWriteInput,
 ): Promise<InvoiceDetailDTO> {
-  const client = await prisma.client.count({
-    where: { id: input.clientId, userId },
-  });
+  // Everything that decides whether this invoice may exist happens inside one
+  // transaction, behind a per-user advisory lock. Without the lock, two
+  // requests from the same free account could both count two existing invoices
+  // and both insert a third and fourth — the limit would hold in testing and
+  // leak under concurrency.
+  const created = await prisma.$transaction(async (tx) => {
+    // Lock this user's invoice creation for the rest of the transaction.
+    // hashtextextended keeps the whole user id in the key rather than the
+    // 32-bit hashtext, which collides far more readily.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))`;
 
-  if (client === 0) {
-    throw new NotFoundError('顧客が見つかりませんでした。');
-  }
+    const client = await tx.client.count({
+      where: { id: input.clientId, userId },
+    });
 
-  const duplicate = await prisma.invoice.count({
-    where: { userId, invoiceNumber: input.invoiceNumber },
-  });
+    if (client === 0) {
+      throw new NotFoundError('顧客が見つかりませんでした。');
+    }
 
-  if (duplicate > 0) {
-    throw new ConflictError('この請求書番号はすでに使用されています。');
-  }
+    const duplicate = await tx.invoice.count({
+      where: { userId, invoiceNumber: input.invoiceNumber },
+    });
 
-  const created = await prisma.invoice.create({
-    data: {
-      userId,
-      clientId: input.clientId,
-      invoiceNumber: input.invoiceNumber,
-      issueDate: input.issueDate,
-      dueDate: input.dueDate,
-      notes: input.notes,
-      subtotal: input.subtotal,
-      tax8: input.tax8,
-      tax10: input.tax10,
-      total: input.total,
-      issuerName: input.issuerName,
-      issuerAddress: input.issuerAddress,
-      issuerPhone: input.issuerPhone,
-      issuerEmail: input.issuerEmail,
-      issuerRegistrationNumber: input.issuerRegistrationNumber,
-      clientNameSnapshot: input.clientNameSnapshot,
-      clientAddressSnapshot: input.clientAddressSnapshot,
-      clientEmailSnapshot: input.clientEmailSnapshot,
-      items: {
-        create: input.items.map((item, index) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate,
-          amount: item.amount,
-          position: index,
-        })),
+    if (duplicate > 0) {
+      throw new ConflictError('この請求書番号はすでに使用されています。');
+    }
+
+    // Entitlement is re-read here, not passed in: a caller could otherwise
+    // hand in a stale or forged quota. The billing row is written only by the
+    // verified Stripe webhook.
+    const billing = await tx.billing.findUnique({
+      where: { userId },
+      select: {
+        status: true,
+        plan: true,
+        currentPeriodEnd: true,
+        cancelAtPeriodEnd: true,
       },
-    },
-    select: { id: true },
+    });
+
+    const entitlement = resolveEntitlement(
+      billing
+        ? {
+            status: billing.status as BillingStatusName,
+            plan: billing.plan as BillingPlanName,
+            currentPeriodEnd: billing.currentPeriodEnd,
+            cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
+          }
+        : null,
+    );
+
+    if (entitlement.invoiceLimit !== null) {
+      const existing = await tx.invoice.count({ where: { userId } });
+      if (existing >= entitlement.invoiceLimit) {
+        throw new QuotaExceededError(QUOTA_REACHED_MESSAGE);
+      }
+    }
+
+    return tx.invoice.create({
+      data: {
+        userId,
+        clientId: input.clientId,
+        invoiceNumber: input.invoiceNumber,
+        issueDate: input.issueDate,
+        dueDate: input.dueDate,
+        notes: input.notes,
+        subtotal: input.subtotal,
+        tax8: input.tax8,
+        tax10: input.tax10,
+        total: input.total,
+        issuerName: input.issuerName,
+        issuerAddress: input.issuerAddress,
+        issuerPhone: input.issuerPhone,
+        issuerEmail: input.issuerEmail,
+        issuerRegistrationNumber: input.issuerRegistrationNumber,
+        clientNameSnapshot: input.clientNameSnapshot,
+        clientAddressSnapshot: input.clientAddressSnapshot,
+        clientEmailSnapshot: input.clientEmailSnapshot,
+        items: {
+          create: input.items.map((item, index) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+            amount: item.amount,
+            position: index,
+          })),
+        },
+      },
+      select: { id: true },
+    });
   });
 
   const invoice = await getInvoiceForUser(userId, created.id);

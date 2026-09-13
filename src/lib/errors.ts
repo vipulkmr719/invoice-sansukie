@@ -17,6 +17,7 @@ export type AppErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION'
   | 'CONFLICT'
+  | 'QUOTA_EXCEEDED'
   | 'INTERNAL';
 
 export class AppError extends Error {
@@ -47,6 +48,18 @@ export class ConflictError extends AppError {
   constructor(message = 'すでに登録されています。') {
     super('CONFLICT', message);
     this.name = 'ConflictError';
+  }
+}
+
+/**
+ * The account has hit a plan limit. Distinct from a validation failure: the
+ * input was fine, the plan is what stopped it, so the UI offers an upgrade
+ * rather than asking the user to correct a field.
+ */
+export class QuotaExceededError extends AppError {
+  constructor(message: string) {
+    super('QUOTA_EXCEEDED', message);
+    this.name = 'QuotaExceededError';
   }
 }
 

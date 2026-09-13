@@ -20,7 +20,13 @@ import 'server-only';
  */
 
 /** Models whose rows belong to exactly one user. */
-const TENANT_MODELS = ['Client', 'Invoice', 'Company', 'InvoiceItem'] as const;
+const TENANT_MODELS = [
+  'Client',
+  'Invoice',
+  'Company',
+  'InvoiceItem',
+  'Billing',
+] as const;
 
 type TenantModel = (typeof TENANT_MODELS)[number];
 
@@ -103,6 +109,15 @@ function hasTenantScope(where: unknown, model: TenantModel): boolean {
   if (user && typeof user === 'object') {
     const relation = user as Record<string, unknown>;
     if (isNonEmpty(relation.id) || isNonEmpty(relation.email)) return true;
+  }
+
+  // Billing carries unique Stripe identifiers. Each belongs to exactly one
+  // user, so selecting by one selects at most one tenant's row — which is what
+  // the Stripe webhook must do before it knows whose account an event is for.
+  if (model === 'Billing') {
+    if (isNonEmpty(clause.customerId) || isNonEmpty(clause.subscriptionId)) {
+      return true;
+    }
   }
 
   // InvoiceItem has no userId of its own; it is scoped through its invoice.

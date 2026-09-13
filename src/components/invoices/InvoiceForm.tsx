@@ -150,7 +150,16 @@ export function InvoiceForm({
 
   return (
     <form action={formAction} className="space-y-6">
-      {failed ? <Alert tone="error">{failed.message}</Alert> : null}
+      {failed ? (
+        <Alert tone={failed.upgradeRequired ? 'warning' : 'error'}>
+          {failed.message}
+          {failed.upgradeRequired ? (
+            <Link href="/upgrade" className="ml-1 font-medium underline">
+              プランを見る
+            </Link>
+          ) : null}
+        </Alert>
+      ) : null}
 
       <Card>
         <CardHeader

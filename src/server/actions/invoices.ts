@@ -11,9 +11,10 @@ import {
 } from '@/lib/action-result';
 import { calculateInvoiceTotals } from '@/domain/tax';
 import { MAX_INVOICE_TOTAL } from '@/validation/invoice';
-import { toPublicErrorMessage } from '@/lib/errors';
+import { QuotaExceededError, toPublicErrorMessage } from '@/lib/errors';
 import { requireUserForAction } from '@/server/auth/guard';
 import { createInvoiceForUser, deleteInvoiceForUser } from '@/server/db/invoices';
+import { consumeRateLimit } from '@/server/rate-limit';
 import { invoiceSchema } from '@/validation/invoice';
 
 /**
@@ -123,6 +124,14 @@ export async function createInvoiceAction(
   try {
     const user = await requireUserForAction();
 
+    const rate = await consumeRateLimit('invoiceCreate', user.id);
+    if (!rate.allowed) {
+      return actionFailure(
+        '短時間に多くの請求書が作成されました。しばらくしてからお試しください。',
+        { values },
+      );
+    }
+
     // Authoritative recomputation — the client's arithmetic is never trusted.
     const totals = calculateInvoiceTotals(parsed.data.items);
 
@@ -163,6 +172,11 @@ export async function createInvoiceAction(
 
     invoiceId = invoice.id;
   } catch (error) {
+    if (error instanceof QuotaExceededError) {
+      // The plan, not the input, is what stopped this. Point at the upgrade
+      // page rather than asking the user to fix a field.
+      return actionFailure(error.message, { values, upgradeRequired: true });
+    }
     return actionFailure(toPublicErrorMessage(error, 'createInvoiceAction'), { values });
   }
 

@@ -16,6 +16,8 @@ export const PROTECTED_PREFIXES = [
   '/invoices',
   '/clients',
   '/settings',
+  '/upgrade',
+  '/payment',
 ] as const;
 
 /**

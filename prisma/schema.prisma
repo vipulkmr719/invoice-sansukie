@@ -31,6 +31,7 @@ model User {
   company  Company?
   clients  Client[]
   invoices Invoice[]
+  billing  Billing?
 
   @@map("users")
 }
@@ -181,4 +182,112 @@ model InvoiceItem {
 
   @@index([invoiceId])
   @@map("invoice_items")
+}
+
+/// 課金状態 (billing state). One row per user.
+///
+/// This table is the ONLY authority on what a user has paid for. It is written
+/// exclusively by the Stripe webhook handler after a signature check — never by
+/// a browser redirect, never by a client-supplied parameter, never by the
+/// /payment/success page.
+///
+/// It stores Stripe *identifiers* only. No card number, no CVV, no expiry, no
+/// cardholder name, no raw payment credential of any kind ever reaches this
+/// database: those live with Stripe and are exchanged through Checkout, which
+/// the browser talks to directly.
+model Billing {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  /// Stripe Customer id (`cus_…`). Unique so two users cannot share one.
+  customerId String? @unique
+
+  /// Stripe Subscription id (`sub_…`) for the recurring plan, when there is one.
+  subscriptionId String? @unique
+
+  /// Mirrors the Stripe subscription status, plus `none` before any purchase.
+  status BillingStatus @default(none)
+
+  /// The plan this entitlement came from. `lifetime` is the one-time purchase
+  /// path, which the architecture supports alongside the monthly subscription.
+  plan BillingPlan @default(free)
+
+  /// End of the paid period. Access is granted only while this is in the
+  /// future (a `lifetime` purchase leaves it null and never expires).
+  currentPeriodEnd DateTime?
+
+  /// Set when the user cancels but has paid through the end of the period.
+  cancelAtPeriodEnd Boolean @default(false)
+
+  /// Stripe price id the entitlement was bought at — kept for support and
+  /// reporting, never used to decide access.
+  priceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([currentPeriodEnd])
+  @@map("billing")
+}
+
+/// Mirrors Stripe's subscription statuses, with `none` for "never purchased".
+enum BillingStatus {
+  none
+  incomplete
+  incomplete_expired
+  trialing
+  active
+  past_due
+  canceled
+  unpaid
+  paused
+}
+
+enum BillingPlan {
+  free
+  monthly
+  lifetime
+}
+
+/// Ledger of Stripe events already applied.
+///
+/// Stripe guarantees at-least-once delivery: the same event WILL arrive twice
+/// eventually. Inserting the event id first, inside the same transaction that
+/// applies the change, makes replay a no-op — the unique constraint rejects the
+/// second copy and the transaction rolls back without touching billing.
+model ProcessedWebhookEvent {
+  /// Stripe's own event id (`evt_…`).
+  id String @id
+
+  type String
+
+  /// When Stripe created the event, for ordering and debugging.
+  eventCreatedAt DateTime
+
+  processedAt DateTime @default(now())
+
+  @@index([type])
+  @@index([processedAt])
+  @@map("processed_webhook_events")
+}
+
+/// Fixed-window rate limit counters.
+///
+/// Kept in the database rather than in process memory so the limit holds across
+/// instances and restarts — an in-memory counter resets on deploy and is per
+/// container, which is not a limit at all behind more than one replica.
+model RateLimit {
+  /// "<bucket>:<subject>:<window start epoch seconds>"
+  key String @id
+
+  count Int @default(0)
+
+  /// When this window may be deleted.
+  expiresAt DateTime
+
+  @@index([expiresAt])
+  @@map("rate_limits")
 }
