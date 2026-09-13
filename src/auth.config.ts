@@ -1,5 +1,7 @@
 import type { NextAuthConfig } from 'next-auth';
 
+import { isSecureDeployment } from '@/lib/transport';
+
 /**
  * Edge-safe half of the Auth.js configuration.
  *
@@ -35,12 +37,80 @@ export function isProtectedPath(pathname: string): boolean {
   );
 }
 
+/**
+ * Whether to send cookies with the `Secure` attribute and the `__Secure-`
+ * name prefix.
+ *
+ * Driven by the deployment's own public origin rather than NODE_ENV: a staging
+ * build running in production mode behind plain HTTP would otherwise set
+ * Secure cookies the browser refuses to store, and the session would silently
+ * never persist. `__Secure-` is enforced by the browser — a cookie with that
+ * prefix is rejected unless it is Secure and from an https origin — so a
+ * downgrade attack cannot overwrite the session cookie over HTTP.
+ */
+const useSecureCookies = isSecureDeployment();
+
 export const authConfig = {
   // Sessions are JWTs: the Credentials provider cannot use database sessions,
   // and a stateless token keeps the edge check free of a database round trip.
   session: {
     strategy: 'jwt',
     maxAge: 60 * 60 * 24 * 7, // 7 days
+    // Re-issue the token at most once a day, so a revoked account's window is
+    // bounded by requireUser()'s database check rather than the token's life.
+    updateAge: 60 * 60 * 24,
+  },
+
+  useSecureCookies,
+
+  cookies: {
+    /*
+     * The session cookie. httpOnly keeps it away from any script on the page —
+     * the single most valuable property here, since it means an XSS bug cannot
+     * exfiltrate a session. SameSite=Lax is what blocks a cross-site form or
+     * image from driving a state-changing request with the user's credentials,
+     * while still allowing a normal top-level link into the app.
+     *
+     * Strict would be marginally tighter but breaks returning from Stripe
+     * Checkout, where the browser arrives from an external origin and must
+     * still be signed in.
+     */
+    sessionToken: {
+      name: `${useSecureCookies ? '__Secure-' : ''}authjs.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: useSecureCookies,
+      },
+    },
+
+    /*
+     * The CSRF token is a double-submit cookie: Auth.js compares the value in
+     * this cookie against the one posted in the body. `__Host-` is the
+     * strongest prefix available — the browser accepts it only when the cookie
+     * is Secure, path=/ and has no Domain attribute, which prevents a
+     * subdomain from setting or overwriting it.
+     */
+    csrfToken: {
+      name: `${useSecureCookies ? '__Host-' : ''}authjs.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: useSecureCookies,
+      },
+    },
+
+    callbackUrl: {
+      name: `${useSecureCookies ? '__Secure-' : ''}authjs.callback-url`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: useSecureCookies,
+      },
+    },
   },
 
   pages: {

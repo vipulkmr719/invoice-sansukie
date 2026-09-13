@@ -12,7 +12,7 @@ import { Field, FieldError, Select, TextArea, TextInput } from '@/components/ui/
 import { SubmitButton } from '@/components/ui/SubmitButton';
 import { TAX_RATE_REDUCED, TAX_RATE_STANDARD, calculateInvoiceTotals } from '@/domain/tax';
 import { formatYen } from '@/domain/money';
-import { MAX_ITEMS_PER_INVOICE } from '@/validation/invoice';
+import { MAX_ITEMS_PER_INVOICE } from '@/domain/limits';
 
 /**
  * 新しい請求書 form.

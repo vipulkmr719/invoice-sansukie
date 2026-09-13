@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
 import { INVOICE_NUMBER_PATTERN } from '@/domain/invoice-number';
+import {
+  MAX_ITEMS_PER_INVOICE,
+  MAX_QUANTITY,
+  MAX_UNIT_PRICE,
+  QUANTITY_DECIMALS,
+  UNIT_PRICE_DECIMALS,
+} from '@/domain/limits';
 import { VALID_TAX_RATES } from '@/domain/tax';
 import { registrationNumberField } from './company';
 
@@ -16,17 +23,12 @@ import {
   trimmedString,
 } from './common';
 
-/**
- * Ceilings that keep every derived amount inside a PostgreSQL `INTEGER`
- * (2,147,483,647) and inside JavaScript's exact-integer range.
- */
-export const MAX_QUANTITY = 1_000_000;
-export const MAX_UNIT_PRICE = 100_000_000;
-export const MAX_INVOICE_TOTAL = 1_000_000_000;
-export const MAX_ITEMS_PER_INVOICE = 100;
-
-const QUANTITY_DECIMALS = 3;
-const UNIT_PRICE_DECIMALS = 2;
+export {
+  MAX_INVOICE_TOTAL,
+  MAX_ITEMS_PER_INVOICE,
+  MAX_QUANTITY,
+  MAX_UNIT_PRICE,
+} from '@/domain/limits';
 
 function decimalPlaces(value: number): number {
   const text = String(value);

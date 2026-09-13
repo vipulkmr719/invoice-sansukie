@@ -14,24 +14,26 @@ const nextConfig: NextConfig = {
   // every run. Nothing in this project depends on them, so keep them out.
   agentRules: false,
 
-  // Baseline security headers for every route.
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'X-DNS-Prefetch-Control', value: 'off' },
-          {
-            key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
-          },
-        ],
-      },
-    ];
+  experimental: {
+    /*
+     * Server Actions reject a request whose Origin does not match the Host,
+     * which is what makes them CSRF-safe by default. Behind a proxy that
+     * rewrites Host, the real public origins must be listed or legitimate
+     * submissions are refused. Read from the environment so a deployment
+     * declares its own origins rather than this file hard-coding one.
+     */
+    serverActions: {
+      allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '')
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+      bodySizeLimit: '1mb',
+    },
   },
+
+  // Security headers are set per request in src/proxy.ts, because the CSP
+  // carries a fresh nonce each time and a static header cannot. Keeping a
+  // second, weaker copy here would only invite the two to drift apart.
 };
 
 export default nextConfig;

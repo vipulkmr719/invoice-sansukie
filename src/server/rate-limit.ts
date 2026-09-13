@@ -50,8 +50,22 @@ export const RATE_LIMITS = {
    */
   invoiceCreate: { limit: 60, windowSeconds: 60 * 10 },
 
-  /** Sign-in attempts, keyed by IP — credential stuffing control. */
+  /**
+   * Sign-in attempts from one IP — credential-stuffing control. Generous
+   * enough for a shared office NAT, low enough to make spraying expensive.
+   */
   login: { limit: 20, windowSeconds: 60 * 10 },
+
+  /**
+   * Sign-in attempts against one account, whatever the source address.
+   * This is the brute-force limit that actually matters: an attacker with a
+   * botnet defeats a per-IP cap, but every attempt still names the account
+   * they are trying to break into.
+   */
+  loginAccount: { limit: 10, windowSeconds: 60 * 15 },
+
+  /** Account creation from one IP — stops automated signup floods. */
+  register: { limit: 10, windowSeconds: 60 * 60 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitBucket = keyof typeof RATE_LIMITS;

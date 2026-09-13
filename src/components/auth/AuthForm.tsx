@@ -7,7 +7,7 @@ import type { ActionResult } from '@/lib/action-result';
 import { Alert } from '@/components/ui/Alert';
 import { Field, TextInput } from '@/components/ui/Field';
 import { SubmitButton } from '@/components/ui/SubmitButton';
-import { PASSWORD_MIN_LENGTH } from '@/validation/auth';
+import { PASSWORD_MIN_LENGTH } from '@/domain/limits';
 
 type AuthAction = (
   previous: ActionResult<undefined> | null,

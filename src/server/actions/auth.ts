@@ -1,6 +1,7 @@
 'use server';
 
 import { AuthError } from 'next-auth';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
@@ -13,6 +14,7 @@ import {
 import { toPublicErrorMessage } from '@/lib/errors';
 import { hashPassword } from '@/server/auth/password';
 import { createUser, findUserByEmail } from '@/server/db/users';
+import { clientIpFromHeaders, consumeRateLimit } from '@/server/rate-limit';
 import { registerSchema } from '@/validation/auth';
 
 /**
@@ -30,8 +32,16 @@ import { registerSchema } from '@/validation/auth';
 /** The one message every sign-in failure produces, whatever the cause. */
 const GENERIC_SIGNIN_ERROR = 'メールアドレスまたはパスワードが正しくありません。';
 
+/** Shown whenever a rate limit stops an attempt. Deliberately vague. */
+const THROTTLED_MESSAGE =
+  '試行回数が上限に達しました。しばらくしてからもう一度お試しください。';
+
 function fieldErrorsOf(error: z.ZodError): Record<string, string[] | undefined> {
   return z.flattenError(error).fieldErrors;
+}
+
+async function requestIp(): Promise<string> {
+  return clientIpFromHeaders(await headers());
 }
 
 export async function registerAction(
@@ -40,6 +50,11 @@ export async function registerAction(
 ): Promise<ActionResult<undefined>> {
   // The email is echoed back on failure; the passwords deliberately are not.
   const values = collectValues(formData, ['email']);
+
+  const signupRate = await consumeRateLimit('register', await requestIp());
+  if (!signupRate.allowed) {
+    return actionFailure(THROTTLED_MESSAGE, { values });
+  }
 
   const parsed = registerSchema.safeParse({
     email: formData.get('email'),
@@ -95,6 +110,26 @@ export async function loginAction(
 
   if (typeof email !== 'string' || typeof password !== 'string') {
     return actionFailure(GENERIC_SIGNIN_ERROR, { values });
+  }
+
+  // Brute-force control on two axes. The per-IP cap stops one host spraying
+  // many accounts; the per-account cap stops a distributed attack on one
+  // account, which a per-IP limit alone does nothing about.
+  //
+  // The account key is the normalised address, not the raw input, so
+  // "USER@x.test" and " user@x.test " share one bucket rather than minting a
+  // fresh allowance per spelling.
+  const accountKey = email.trim().toLowerCase().slice(0, 254);
+
+  const [ipRate, accountRate] = await Promise.all([
+    consumeRateLimit('login', await requestIp()),
+    consumeRateLimit('loginAccount', accountKey),
+  ]);
+
+  if (!ipRate.allowed || !accountRate.allowed) {
+    // Same shape as a failed sign-in, so the response does not reveal whether
+    // the account exists — only that the caller should slow down.
+    return actionFailure(THROTTLED_MESSAGE, { values });
   }
 
   try {
