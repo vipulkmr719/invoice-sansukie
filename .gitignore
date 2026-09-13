@@ -1,0 +1,64 @@
+# ---- dependencies ----
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ---- next.js ----
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# ---- testing / coverage ----
+/coverage
+*.lcov
+
+# ---- production ----
+/dist
+
+# ---- misc ----
+.DS_Store
+*.pem
+Thumbs.db
+
+# ---- debug logs ----
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- SECRETS: never commit these ----
+.env
+.env.*
+!.env.example
+*.env
+.envrc
+secrets.json
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+service-account*.json
+credentials.json
+.vercel
+
+# ---- prisma ----
+/prisma/*.db
+/prisma/*.db-journal
+/src/generated/
+
+# ---- editor / os ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ---- typescript ----
+*.tsbuildinfo
