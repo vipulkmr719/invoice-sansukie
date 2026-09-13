@@ -14,13 +14,8 @@ export default async function AppLayout({
 }) {
   const user = await requireUser();
 
-  async function handleLogout() {
-    'use server';
-    await logoutAction();
-  }
-
   return (
-    <AppShell email={user.email} logoutAction={handleLogout}>
+    <AppShell email={user.email} logoutAction={logoutAction}>
       {children}
     </AppShell>
   );

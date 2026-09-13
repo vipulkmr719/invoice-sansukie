@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { checkDatabaseConnection, prisma } from '@/server/db/prisma';
+import { prisma } from '@/server/db/prisma';
+import { checkDatabaseConnection } from '@/server/db/health';
 import { calculateInvoiceTotals } from '@/domain/tax';
 import { hashPassword, verifyPassword } from '@/server/auth/password';
 
@@ -43,11 +44,23 @@ describe('データベース接続 (database connection)', () => {
   });
 
   it('exposes every model the application uses', async () => {
+    // Counts on tenant-owned models are scoped by user — the tenant guard
+    // refuses an unscoped query, which is the behaviour we want everywhere.
+    const user = await createTestUser();
+
     await expect(prisma.user.count()).resolves.toBeTypeOf('number');
-    await expect(prisma.company.count()).resolves.toBeTypeOf('number');
-    await expect(prisma.client.count()).resolves.toBeTypeOf('number');
-    await expect(prisma.invoice.count()).resolves.toBeTypeOf('number');
-    await expect(prisma.invoiceItem.count()).resolves.toBeTypeOf('number');
+    await expect(
+      prisma.company.count({ where: { userId: user.id } }),
+    ).resolves.toBeTypeOf('number');
+    await expect(
+      prisma.client.count({ where: { userId: user.id } }),
+    ).resolves.toBeTypeOf('number');
+    await expect(
+      prisma.invoice.count({ where: { userId: user.id } }),
+    ).resolves.toBeTypeOf('number');
+    await expect(
+      prisma.invoiceItem.count({ where: { invoice: { userId: user.id } } }),
+    ).resolves.toBeTypeOf('number');
   });
 
   it('has applied the migrations', async () => {
@@ -125,8 +138,8 @@ describe('請求書の永続化 (invoice persistence)', () => {
       select: { id: true },
     });
 
-    const stored = await prisma.invoice.findUniqueOrThrow({
-      where: { id: invoice.id },
+    const stored = await prisma.invoice.findFirstOrThrow({
+      where: { id: invoice.id, userId: user.id },
       include: { items: { orderBy: { position: 'asc' } } },
     });
 

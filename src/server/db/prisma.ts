@@ -5,6 +5,8 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { env, isProduction } from '@/lib/env';
 import { PrismaClient } from '@/generated/prisma/client';
 
+import { tenantGuardExtension } from './tenant-guard';
+
 /**
  * The single Prisma client for the process.
  *
@@ -18,28 +20,28 @@ import { PrismaClient } from '@/generated/prisma/client';
  * hence the globalThis cache.
  */
 
-function createPrismaClient(): PrismaClient {
+function createPrismaClient() {
   const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
 
-  return new PrismaClient({
+  const client = new PrismaClient({
     adapter,
     log: isProduction ? ['error'] : ['warn', 'error'],
   });
+
+  // Tenant-scope guard: refuses any query on Client / Invoice / InvoiceItem /
+  // Company that is not scoped to the owning user. See ./tenant-guard.ts.
+  return client.$extends(tenantGuardExtension());
 }
 
+export type ExtendedPrismaClient = ReturnType<typeof createPrismaClient>;
+
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+  prisma: ExtendedPrismaClient | undefined;
 };
 
-export const prisma: PrismaClient = globalForPrisma.prisma ?? createPrismaClient();
+export const prisma: ExtendedPrismaClient =
+  globalForPrisma.prisma ?? createPrismaClient();
 
 if (!isProduction) {
   globalForPrisma.prisma = prisma;
-}
-
-/** Liveness probe used by the health route and the connection test. */
-export async function checkDatabaseConnection(): Promise<boolean> {
-  // Parameterless constant query — no user input is involved anywhere here.
-  await prisma.$queryRaw`SELECT 1`;
-  return true;
 }

@@ -2,7 +2,7 @@
 
 適格請求書等保存方式（インボイス制度）に対応した、請求書の作成・管理 SaaS。
 
-Next.js (App Router) · TypeScript (strict) · Tailwind CSS · PostgreSQL · Prisma · Zod
+Next.js (App Router) · TypeScript (strict) · Tailwind CSS · PostgreSQL · Prisma · Zod · Auth.js
 
 ---
 
@@ -42,7 +42,7 @@ cp .env.example .env
 | 変数 | 必須 | 説明 |
 | --- | --- | --- |
 | `DATABASE_URL` | ✔ | PostgreSQL 接続文字列。**サーバー専用** — ブラウザには一切露出しません。 |
-| `AUTH_SECRET` | ✔ | セッション JWT の署名鍵。32文字以上。 |
+| `AUTH_SECRET` | ✔ | Auth.js がセッション JWT の署名に使う鍵。32文字以上。 |
 | `NODE_ENV` | | `development` \| `test` \| `production` |
 | `APP_URL` | | 公開オリジン。既定は `http://localhost:3000` |
 | `PDF_CHROME_PATH` | | PDF 生成に使う Chrome/Chromium のパス。未設定なら puppeteer 同梱版を使用。 |
@@ -112,7 +112,7 @@ src/
 │
 ├── server/                   サーバー専用。'server-only' で保護
 │   ├── actions/              Server Actions（唯一の書き込み入口）
-│   ├── db/                   データアクセス層（リポジトリ + DTO）
+│   ├── db/                   データアクセス層（リポジトリ + DTO + テナントガード）
 │
 │   ├── auth/                 セッション・パスワード・認可ガード
 │   └── pdf/                  PDF 生成
@@ -128,7 +128,9 @@ src/
 │
 ├── validation/               Zod スキーマ（入力の境界）
 ├── lib/                      env, errors, date, cn, action-result, html
-└── proxy.ts                  エッジでの事前リダイレクト（補助的な関門）
+├── auth.ts                   Auth.js 設定（Credentials プロバイダ / Node ランタイム）
+├── auth.config.ts            Auth.js 設定のうちエッジ実行可能な部分
+└── proxy.ts                  エッジでのセッション検証とリダイレクト
 ```
 
 ### レイヤーの原則
@@ -179,6 +181,56 @@ src/
 
 ---
 
+## 認証
+
+Auth.js（NextAuth v5）の Credentials プロバイダによるメールアドレス + パスワード認証です。
+
+- **パスワードハッシュ**: scrypt（N=2^17, r=8, p=1）+ ランダムソルト、`timingSafeEqual` で比較。
+  Node 標準の `node:crypto` のみで、追加依存はありません。平文は保存も記録もしません。
+  （bcrypt ではなく scrypt を採用した理由は「残っている課題」を参照）
+- **パスワード要件**: 10文字以上、英字と数字を含むこと。
+- **セッション**: HS256 署名の JWT を httpOnly / SameSite=Lax / 本番は Secure な Cookie に格納。
+  中身は user id のみ。Credentials プロバイダはデータベースセッションを使えないため JWT 戦略です。
+- **汎用エラーメッセージ**: 未登録のアドレス・誤ったパスワード・パスワード未設定のいずれでも
+  「メールアドレスまたはパスワードが正しくありません。」の1種類だけを返します。
+  アカウントの存在を応答から判別できません。
+- **タイミング攻撃対策**: アカウントが存在しない場合もダミーハッシュで同じ scrypt 計算を実行します。
+
+## データ分離（マルチテナント）
+
+`Client` / `Invoice` / `InvoiceItem` / `Company` のすべての読み書きは、認証済みユーザーに
+スコープされます。これを **3層** で担保しています。どの1層が欠けても分離は破れません。
+
+**第1層 — アプリケーション**
+リポジトリ層（`src/server/db/`）のみが Prisma に触れ、すべてのクエリが
+`where: { id, userId }` の形を取ります。所有権は取得後の比較ではなく `where` 句で
+表現するため、比較の書き忘れが起こりません。他人の ID は「存在しない ID」と
+同じ結果（null / 404）になり、存在の有無すら分かりません。
+
+**第2層 — テナントガード（`src/server/db/tenant-guard.ts`）**
+Prisma のクライアント拡張として、テナント所有モデルに対する
+**スコープされていないクエリをデータベースに到達する前に拒否**します。
+`findUnique({ where: { id } })` のような、一見正しく見えて他人の行を返すクエリは
+静かな情報漏洩ではなく即座の例外になります。`OR` の中のスコープは
+（片方の枝が無条件なら結果集合が広がるため）スコープとして認めません。
+
+**第3層 — データベース**
+`invoices` は `(clientId, userId)` の複合外部キーで `clients(id, userId)` を参照します。
+他人の顧客を参照する請求書は、アプリケーションを完全に迂回しても
+**データベースが拒否**します。
+
+さらに `tests/data-access-audit.test.ts` がソースを静的に検査し、
+リポジトリ層以外から Prisma を呼んでいないこと、テナントモデルへの全クエリが
+`userId` に言及していることを、実行経路に関係なく確認します。
+
+### カスケードの安全性
+
+- ユーザー削除 → 自社情報・顧客・請求書・明細をカスケード削除（自分のデータのみ）。
+- `invoices → clients` は **NO ACTION**。RESTRICT だとユーザー削除時に
+  どちらのカスケードが先に走るかで成否が変わるため、文の終わりに検査される
+  NO ACTION を選んでいます。請求書が紐づく顧客の削除は引き続き拒否されます。
+- `invoice_items → invoices` はカスケード削除。明細は請求書経由でしか到達できません。
+
 ## セキュリティ
 
 | 対策 | 実装 |
@@ -191,7 +243,7 @@ src/
 | クライアント入力を信用しない | すべての Server Action が Zod で検証。金額は **サーバーで再計算** され、クライアントが送った合計は使いません。`userId` はセッションから取得し、フォームの値は無視します。 |
 | DB 操作はサーバー側のみ | Prisma Client は `src/server/db/prisma.ts` のみに存在。 |
 | SQL インジェクション対策 | Prisma のパラメータ化クエリのみ。生 SQL は引数のない `SELECT 1` だけです。 |
-| 認可 | すべてのクエリが `where: { userId }` で絞り込み。他人の ID を指定しても 404 になります。 |
+| 認可 | すべてのクエリが `where: { userId }` で絞り込み。他人の ID を指定しても 404 になります。アプリ層・テナントガード・複合外部キーの3層で担保。 |
 | エラー処理 | `AppError` は日本語の安全なメッセージ、それ以外はサーバーログに記録し汎用文言に置き換え。スタックトレースやシークレットは返しません。 |
 | XSS 対策 | PDF/HTML はエスケープ既定のタグ付きテンプレートで構築。生の markup を入れられるのは `unsafeRawHtml()` のみ（呼び出しは定数 CSS 1箇所）。React 側は既定でエスケープされます。 |
 | PDF レンダラーの隔離 | ページ上で JavaScript を無効化、初回ドキュメント以外の通信を遮断（SSRF 対策）、リクエストごとに独立コンテキスト。 |
@@ -200,7 +252,9 @@ src/
 | セッション | HS256 署名 JWT を httpOnly / SameSite=Lax / 本番は Secure な Cookie に格納。中身は user id のみ。毎リクエストで DB 実在確認。 |
 | セキュリティヘッダー | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`。`X-Powered-By` は無効化。 |
 
-`src/proxy.ts`（エッジ）は Cookie の有無だけを見る **補助的な** 関門です。実際の認可は各ページの `requireUser()` が行います。
+`src/proxy.ts`（エッジ）は Auth.js がセッション JWT の署名を検証したうえでリダイレクトを
+判断する **補助的な** 関門です。実際の認可は各ページの `requireUser()`（アカウントの実在を
+毎回データベースで確認）と、すべてのクエリのテナントスコープが行います。
 
 ---
 
@@ -212,6 +266,9 @@ npm test
 
 | ファイル | 内容 |
 | --- | --- |
+| `tests/idor.test.ts` | User A / User B による IDOR 検証: 請求書・顧客・自社情報・明細・ダッシュボード集計・PDF の越境アクセス、越境の更新／削除、複合外部キー、カスケードの安全性 |
+| `tests/tenant-guard.test.ts` | テナントガードの述語: スコープなしの読み書きを拒否し、正しいスコープ（`userId` / 関係経由 / 複合ユニークキー / AND 内）は通す |
+| `tests/data-access-audit.test.ts` | ソースの静的検査: リポジトリ層以外から Prisma を呼んでいないこと、全テナントクエリが `userId` に言及していること |
 | `tests/db.test.ts` | データベース接続、全モデルの疎通、マイグレーション適用確認、請求書の永続化、CHECK 制約（不正な税率・負の数量・負の単価・合計不整合・登録番号形式・日付逆転）、パスワードハッシュ |
 | `tests/invoice-validation.test.ts` | 請求書作成の検証、明細の税率、負の数量、負の単価、登録番号（形式・チェックデジット）、顧客の検証 |
 | `tests/invoice-security.test.ts` | セキュリティ要件の9項目（XSS×3・登録番号・負の数量・負の単価・不正な税率・極端に大きい値・必須項目の欠落）+ 日付と識別子 |
@@ -262,6 +319,21 @@ npm test
 同じ関数をフォームのプレビューと Server Action の両方が呼ぶため、画面の金額と保存される金額が必ず一致します。保存時はサーバー側で再計算するので、クライアントが改ざんした値は採用されません。
 
 ---
+
+## 残っている課題
+
+- **パスワードハッシュに scrypt を採用**しています。要件は「bcrypt/secure password hashing」
+  でしたが、scrypt はメモリハードで OWASP の推奨アルゴリズムであり、bcrypt にある
+  72バイトでの切り捨てもありません。Node 標準の `node:crypto` だけで動くため、
+  ネイティブビルドや追加依存も不要です。bcrypt が必須であれば
+  `src/server/auth/password.ts` の差し替えだけで対応できます
+  （保存形式にアルゴリズム名が含まれているため、既存ハッシュとの併存も可能です）。
+- **Auth.js v5 はベータ**（`next-auth@5.0.0-beta.32`）です。App Router 対応の系列は
+  現状これのみで、v4 は Pages Router 前提です。
+- **OAuth / マジックリンクは未実装**です。追加する場合は `@auth/prisma-adapter` と
+  `Account` / `Session` / `VerificationToken` モデルが必要になります
+  （`User.passwordHash` はその前提で nullable のままにしてあります）。
+- 請求書の編集機能はまだありません（作成・閲覧・削除のみ）。
 
 ## ライセンス / 免責
 

@@ -76,6 +76,10 @@ model Client {
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   invoices Invoice[]
 
+  /// Tenant-scoped key. Invoice references (id, userId) rather than id alone,
+  /// so the database itself refuses to link an invoice to another user's
+  /// client — cross-tenant linkage is impossible, not merely checked.
+  @@unique([id, userId])
   @@index([userId])
   @@index([userId, createdAt])
   @@map("clients")
@@ -130,15 +134,27 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Composite foreign key: the referenced client must belong to the same user.
+  ///
+  /// NoAction rather than Restrict on purpose. Deleting a user cascades to both
+  /// clients and invoices in one statement; RESTRICT is checked immediately and
+  /// would fail or succeed depending on which cascade PostgreSQL happens to run
+  /// first, whereas NO ACTION is checked at the end of the statement, by which
+  /// time the invoices are gone too. Deleting a client that still has invoices
+  /// is still refused — by this constraint and, with a readable message, by
+  /// `deleteClientForUser`.
+  client Client @relation(fields: [clientId, userId], references: [id, userId], onDelete: NoAction)
 
   items InvoiceItem[]
 
   @@unique([userId, invoiceNumber])
   @@index([userId, issueDate])
   @@index([userId, dueDate])
-  @@index([clientId])
+  /// Matches the composite foreign key, so the referencing-side checks and
+  /// "invoices for this client" lookups both use one index.
+  @@index([clientId, userId])
   @@map("invoices")
 }
 

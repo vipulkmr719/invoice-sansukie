@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { checkDatabaseConnection } from '@/server/db/prisma';
+import { checkDatabaseConnection } from '@/server/db/health';
 
 export const dynamic = 'force-dynamic';
 

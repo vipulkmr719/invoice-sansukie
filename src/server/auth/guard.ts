@@ -3,10 +3,17 @@ import 'server-only';
 import { cache } from 'react';
 import { redirect } from 'next/navigation';
 
+import { auth } from '@/auth';
 import { UnauthorizedError } from '@/lib/errors';
 import { findUserById } from '@/server/db/users';
 
-import { readSession } from './session';
+/**
+ * The single source of the authenticated identity.
+ *
+ * Every protected page and every server action resolves the current user
+ * through this module, and every repository call takes the resulting `id` as
+ * its tenant key. Nothing else in the application may decide who the caller is.
+ */
 
 export interface AuthenticatedUser {
   id: string;
@@ -21,12 +28,15 @@ export interface AuthenticatedUser {
  *
  * The token's subject is re-checked against the database on every request: a
  * deleted account must stop working immediately, not when its JWT expires.
+ * Auth.js has already verified the token's signature and expiry by this point.
  */
 export const getCurrentUser = cache(async (): Promise<AuthenticatedUser | null> => {
-  const session = await readSession();
-  if (!session) return null;
+  const session = await auth();
 
-  const user = await findUserById(session.userId);
+  const userId = session?.user?.id;
+  if (!userId) return null;
+
+  const user = await findUserById(userId);
   if (!user) return null;
 
   return { id: user.id, email: user.email };

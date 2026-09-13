@@ -108,8 +108,8 @@ describe('請求書の保存と再読み込み (create → save → reopen)', ()
     const created = await createInvoiceForUser(user.id, writeInput(client.id));
 
     // Rename the client after the invoice was issued.
-    await prisma.client.update({
-      where: { id: client.id },
+    await prisma.client.updateMany({
+      where: { id: client.id, userId: user.id },
       data: { name: '改名後 太郎', companyName: '改名後株式会社' },
     });
 
