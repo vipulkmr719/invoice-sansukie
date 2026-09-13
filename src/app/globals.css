@@ -1,0 +1,98 @@
+@import 'tailwindcss';
+
+/* ==========================================================================
+   インボイス作成 — design tokens
+   A restrained, paper-and-ink palette: near-white surfaces, a single indigo
+   accent for actions, and a warm amber reserved for overdue warnings.
+   ========================================================================== */
+
+@theme {
+  --font-sans:
+    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'BIZ UDPGothic', Meiryo,
+    system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-ink-50: #f6f7f9;
+  --color-ink-100: #eceef2;
+  --color-ink-200: #d9dde5;
+  --color-ink-300: #b6bdcb;
+  --color-ink-400: #8d97ab;
+  --color-ink-500: #6b7688;
+  --color-ink-600: #525b6b;
+  --color-ink-700: #3e4553;
+  --color-ink-800: #2a303b;
+  --color-ink-900: #191d25;
+
+  --color-brand-50: #eef1ff;
+  --color-brand-100: #e0e5ff;
+  --color-brand-200: #c6cfff;
+  --color-brand-500: #4f5bd5;
+  --color-brand-600: #414bbd;
+  --color-brand-700: #343c99;
+
+  --color-accent-50: #fff7ed;
+  --color-accent-200: #fed7aa;
+  --color-accent-600: #d97706;
+  --color-accent-700: #b45309;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-ink-50);
+  color: var(--color-ink-800);
+  font-family: var(--font-sans);
+  font-feature-settings: 'palt';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus must stay visible everywhere. */
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+/* Tabular figures keep money columns aligned. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   印刷 / PDF 出力
+   「PDFをダウンロード」triggers window.print(); the browser's own
+   "Save as PDF" destination produces the file. Everything outside the invoice
+   sheet is hidden here.
+   -------------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-sheet {
+    box-shadow: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .print-break-avoid {
+    break-inside: avoid;
+  }
+}
